@@ -22,18 +22,18 @@ namespace Wpf.Controls.PanAndZoom
         private Point _previous;
         private Matrix _matrix;
         private bool _isPanning;
-        private static readonly StretchMode[] s_autoFitModes = (StretchMode[])Enum.GetValues(typeof(StretchMode));
-        private static readonly ButtonName[] s_buttonNames = (ButtonName[])Enum.GetValues(typeof(ButtonName));
+        private static StretchMode[] _autoFitModes = (StretchMode[])Enum.GetValues(typeof(StretchMode));
+        private static ButtonName[] _buttonNames = (ButtonName[])Enum.GetValues(typeof(ButtonName));
 
         /// <summary>
         /// Gets available stretch modes.
         /// </summary>
-        public static StretchMode[] StretchModes => s_autoFitModes;
+        public static StretchMode[] StretchModes => _autoFitModes;
 
         /// <summary>
         /// Gets available button names.
         /// </summary>
-        public static ButtonName[] ButtonNames => s_buttonNames;
+        public static ButtonName[] ButtonNames => _buttonNames;
 
         /// <inheritdoc/>
         public Action<double, double, double, double>? InvalidatedChild { get; set; }
@@ -415,16 +415,14 @@ namespace Wpf.Controls.PanAndZoom
         {
             var size = base.ArrangeOverride(finalSize);
 
-            if (_element == null || !_element.IsMeasureValid)
+            if (_element != null && _element.IsMeasureValid)
             {
-                return size;
+                AutoFit(
+                    size.Width,
+                    size.Height,
+                    _element.RenderSize.Width,
+                    _element.RenderSize.Height);
             }
-
-            AutoFit(
-                size.Width,
-                size.Height,
-                _element.RenderSize.Width,
-                _element.RenderSize.Height);
 
             return size;
         }
@@ -443,43 +441,38 @@ namespace Wpf.Controls.PanAndZoom
 
         private void Border_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (!EnableInput)
+            if (EnableInput)
             {
-                return;
+                Wheel(e);
             }
-            Wheel(e);
         }
 
         private void Border_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (!EnableInput)
+            if (EnableInput)
             {
-                return;
+                var button = PanButton;
+                if ((e.ChangedButton == MouseButton.Left && button == ButtonName.Left)
+                    || (e.ChangedButton == MouseButton.Right && button == ButtonName.Right)
+                    || (e.ChangedButton == MouseButton.Middle && button == ButtonName.Middle))
+                {
+                    Pressed(e);
+                }
             }
-            var button = PanButton;
-            if ((e.ChangedButton != MouseButton.Left || button != ButtonName.Left)
-                && (e.ChangedButton != MouseButton.Right || button != ButtonName.Right)
-                && (e.ChangedButton != MouseButton.Middle || button != ButtonName.Middle))
-            {
-                return;
-            }
-            Pressed(e);
         }
 
         private void Border_PreviewMouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (!EnableInput)
+            if (EnableInput)
             {
-                return;
+                var button = PanButton;
+                if ((e.ChangedButton == MouseButton.Left && button == ButtonName.Left)
+                    || (e.ChangedButton == MouseButton.Right && button == ButtonName.Right)
+                    || (e.ChangedButton == MouseButton.Middle && button == ButtonName.Middle))
+                {
+                    Released(e);
+                }
             }
-            var button = PanButton;
-            if ((e.ChangedButton != MouseButton.Left || button != ButtonName.Left)
-                && (e.ChangedButton != MouseButton.Right || button != ButtonName.Right)
-                && (e.ChangedButton != MouseButton.Middle || button != ButtonName.Middle))
-            {
-                return;
-            }
-            Released(e);
         }
 
         private void Border_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -492,143 +485,123 @@ namespace Wpf.Controls.PanAndZoom
 
         private void Border_ManipulationStarting(object? sender, ManipulationStartingEventArgs e)
         {
-            if (!EnableInput || _element == null)
+            if (EnableInput && _element != null)
             {
-                return;
+                e.ManipulationContainer = this;
             }
-            e.ManipulationContainer = this;
         }
 
         private void Border_ManipulationDelta(object? sender, ManipulationDeltaEventArgs e)
         {
-            if (!EnableInput || _element == null)
+            if (EnableInput && _element != null)
             {
-                return;
+                var deltaManipulation = e.DeltaManipulation;
+                double scale = ((deltaManipulation.Scale.X - 1) * ZoomSpeed) + 1;
+                var matrix = ((MatrixTransform)_element.RenderTransform).Matrix;
+                Point center = new Point(_element.RenderSize.Width / 2, _element.RenderSize.Height / 2);
+                center = matrix.Transform(center);
+
+                if (EnableGestureZoom)
+                {
+                    matrix.ScaleAt(scale, scale, center.X, center.Y);
+                }
+
+                if (EnableGestureRotation)
+                {
+                    matrix.RotateAt(e.DeltaManipulation.Rotation, center.X, center.Y);
+                }
+
+                if (EnableGestureTranslation)
+                {
+                    matrix.Translate(e.DeltaManipulation.Translation.X, e.DeltaManipulation.Translation.Y);
+                }
+
+                 ((MatrixTransform)_element.RenderTransform).Matrix = matrix;
+                e.Handled = true;
             }
-            Manipulation(e.DeltaManipulation);
-            e.Handled = true;
         }
 
         private void ChildChanged(UIElement element)
         {
-            if (element == null || element == _element || _element == null)
-            {
-            }
-            else
+            if (element != null && element != _element && _element != null)
             {
                 DetachElement();
             }
 
-            if (element == null || element == _element)
+            if (element != null && element != _element)
             {
-                return;
+                AttachElement(element);
             }
-            AttachElement(element);
         }
 
         private void AttachElement(UIElement element)
         {
-            if (element == null)
+            if (element != null)
             {
-                return;
+                Defaults();
+                _element = element;
+                this.Focus();
+                this.PreviewMouseWheel += Border_PreviewMouseWheel;
+                this.PreviewMouseDown += Border_PreviewMouseDown;
+                this.PreviewMouseUp += Border_PreviewMouseUp;
+                this.PreviewMouseMove += Border_PreviewMouseMove;
+                this.ManipulationStarting += Border_ManipulationStarting;
+                this.ManipulationDelta += Border_ManipulationDelta;
             }
-            Defaults();
-            _element = element;
-            this.Focus();
-            this.PreviewMouseWheel += Border_PreviewMouseWheel;
-            this.PreviewMouseDown += Border_PreviewMouseDown;
-            this.PreviewMouseUp += Border_PreviewMouseUp;
-            this.PreviewMouseMove += Border_PreviewMouseMove;
-            this.ManipulationStarting += Border_ManipulationStarting;
-            this.ManipulationDelta += Border_ManipulationDelta;
         }
 
         private void DetachElement()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                this.PreviewMouseWheel -= Border_PreviewMouseWheel;
+                this.PreviewMouseDown -= Border_PreviewMouseDown;
+                this.PreviewMouseUp -= Border_PreviewMouseUp;
+                this.PreviewMouseMove -= Border_PreviewMouseMove;
+                this.ManipulationStarting -= Border_ManipulationStarting;
+                this.ManipulationDelta -= Border_ManipulationDelta;
+                _element.RenderTransform = null;
+                _element = null;
+                Defaults();
             }
-            this.PreviewMouseWheel -= Border_PreviewMouseWheel;
-            this.PreviewMouseDown -= Border_PreviewMouseDown;
-            this.PreviewMouseUp -= Border_PreviewMouseUp;
-            this.PreviewMouseMove -= Border_PreviewMouseMove;
-            this.ManipulationStarting -= Border_ManipulationStarting;
-            this.ManipulationDelta -= Border_ManipulationDelta;
-            _element.RenderTransform = null;
-            _element = null;
-            Defaults();
         }
 
         private void Wheel(MouseWheelEventArgs e)
         {
-            if (_element == null || Mouse.Captured != null)
+            if (_element != null && Mouse.Captured == null)
             {
-                return;
+                Point point = e.GetPosition(_element);
+                ZoomDeltaTo((double)e.Delta, point.X, point.Y);
             }
-            Point point = e.GetPosition(_element);
-            ZoomDeltaTo((double)e.Delta, point.X, point.Y);
         }
 
         private void Pressed(MouseButtonEventArgs e)
         {
-            if (_element == null || Mouse.Captured != null || _isPanning != false)
+            if (_element != null && Mouse.Captured == null && _isPanning == false)
             {
-                return;
+                Point point = e.GetPosition(_element);
+                StartPan(point.X, point.Y);
+                _element.CaptureMouse();
+                _isPanning = true;
             }
-            Point point = e.GetPosition(_element);
-            StartPan(point.X, point.Y);
-            _element.CaptureMouse();
-            _isPanning = true;
         }
 
         private void Released(MouseButtonEventArgs e)
         {
-            if (_element == null || _element.IsMouseCaptured != true || _isPanning != true)
+            if (_element != null && _element.IsMouseCaptured == true && _isPanning == true)
             {
-                return;
+                _element.ReleaseMouseCapture();
+                _isPanning = false;
             }
-            _element.ReleaseMouseCapture();
-            _isPanning = false;
         }
 
         private void Moved(MouseEventArgs e)
         {
-            if (_element == null || _element.IsMouseCaptured != true || _isPanning != true)
+            if (_element != null && _element.IsMouseCaptured == true && _isPanning == true)
             {
-                return;
+                Point point = e.GetPosition(_element);
+                PanTo(point.X, point.Y);
             }
-            Point point = e.GetPosition(_element);
-            PanTo(point.X, point.Y);
-        }
-
-        private void Manipulation(ManipulationDelta delta)
-        {
-            if (_element == null)
-            {
-                return;
-            }
-
-            var scale = ((delta.Scale.X - 1) * ZoomSpeed) + 1;
-            var center = new Point(_element.RenderSize.Width / 2, _element.RenderSize.Height / 2);
-            center = _matrix.Transform(center);
-
-            if (EnableGestureZoom)
-            {
-                _matrix.ScaleAt(scale, scale, center.X, center.Y);
-            }
-
-            if (EnableGestureRotation)
-            {
-                _matrix.RotateAt(delta.Rotation, center.X, center.Y);
-            }
-
-            if (EnableGestureTranslation)
-            {
-                _matrix.Translate(delta.Translation.X, delta.Translation.Y);
-            }
-
-            Invalidate();
         }
 
         private double Constrain(double value, double minimum, double maximum)
@@ -654,23 +627,22 @@ namespace Wpf.Controls.PanAndZoom
         /// <inheritdoc/>
         public void Invalidate()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                if (EnableConstrains == true)
+                {
+                    Constrain();
+                }
+                Debug.WriteLine($"Zoom: {_matrix.M11} {_matrix.M22} Offset: {_matrix.OffsetX} {_matrix.OffsetY}");
+                SetValue(ZoomXPropertyKey, _matrix.M11);
+                SetValue(ZoomYPropertyKey, _matrix.M22);
+                SetValue(OffsetXPropertyKey, _matrix.OffsetX);
+                SetValue(OffsetYPropertyKey, _matrix.OffsetY);
+                this.InvalidatedChild?.Invoke(_matrix.M11, _matrix.M22, _matrix.OffsetX, _matrix.OffsetY);
+                _element.RenderTransformOrigin = new Point(0, 0);
+                _element.RenderTransform = new MatrixTransform(_matrix);
+                _element.InvalidateVisual();
             }
-            if (EnableConstrains == true)
-            {
-                Constrain();
-            }
-            Debug.WriteLine($"Zoom: {_matrix.M11} {_matrix.M22} Offset: {_matrix.OffsetX} {_matrix.OffsetY}");
-            SetValue(ZoomXPropertyKey, _matrix.M11);
-            SetValue(ZoomYPropertyKey, _matrix.M22);
-            SetValue(OffsetXPropertyKey, _matrix.OffsetX);
-            SetValue(OffsetYPropertyKey, _matrix.OffsetY);
-            this.InvalidatedChild?.Invoke(_matrix.M11, _matrix.M22, _matrix.OffsetX, _matrix.OffsetY);
-            _element.RenderTransformOrigin = new Point(0, 0);
-            _element.RenderTransform = new MatrixTransform(_matrix);
-            _element.InvalidateVisual();
         }
 
         /// <inheritdoc/>
@@ -764,9 +736,6 @@ namespace Wpf.Controls.PanAndZoom
                             return MatrixHelper.ScaleAt(zoom, zoom, cx, cy);
                         }
                     }
-
-                case StretchMode.None:
-                    break;
             }
             return Matrix.Identity;
         }
@@ -775,59 +744,55 @@ namespace Wpf.Controls.PanAndZoom
         public void Fill(double panelWidth, double panelHeight, double elementWidth, double elementHeight)
         {
             Debug.WriteLine($"Fill: {panelWidth}x{panelHeight} {elementWidth}x{elementHeight}");
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.Fill);
+                Invalidate();
             }
-            _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.Fill);
-            Invalidate();
         }
 
         /// <inheritdoc/>
         public void Uniform(double panelWidth, double panelHeight, double elementWidth, double elementHeight)
         {
             Debug.WriteLine($"Uniform: {panelWidth}x{panelHeight} {elementWidth}x{elementHeight}");
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.Uniform);
+                Invalidate();
             }
-            _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.Uniform);
-            Invalidate();
         }
 
         /// <inheritdoc/>
         public void UniformToFill(double panelWidth, double panelHeight, double elementWidth, double elementHeight)
         {
             Debug.WriteLine($"UniformToFill: {panelWidth}x{panelHeight} {elementWidth}x{elementHeight}");
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.UniformToFill);
+                Invalidate();
             }
-            _matrix = GetMatrix(panelWidth, panelHeight, elementWidth, elementHeight, StretchMode.UniformToFill);
-            Invalidate();
         }
 
         /// <inheritdoc/>
         public void AutoFit(double panelWidth, double panelHeight, double elementWidth, double elementHeight)
         {
             Debug.WriteLine($"AutoFit: {panelWidth}x{panelHeight} {elementWidth}x{elementHeight}");
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                switch (Stretch)
+                {
+                    case StretchMode.Fill:
+                        Fill(panelWidth, panelHeight, elementWidth, elementHeight);
+                        break;
+                    case StretchMode.Uniform:
+                        Uniform(panelWidth, panelHeight, elementWidth, elementHeight);
+                        break;
+                    case StretchMode.UniformToFill:
+                        UniformToFill(panelWidth, panelHeight, elementWidth, elementHeight);
+                        break;
+                }
+                Invalidate();
             }
-            switch (Stretch)
-            {
-                case StretchMode.Fill:
-                    Fill(panelWidth, panelHeight, elementWidth, elementHeight);
-                    break;
-                case StretchMode.Uniform:
-                    Uniform(panelWidth, panelHeight, elementWidth, elementHeight);
-                    break;
-                case StretchMode.UniformToFill:
-                    UniformToFill(panelWidth, panelHeight, elementWidth, elementHeight);
-                    break;
-            }
-            Invalidate();
         }
 
         /// <inheritdoc/>
@@ -860,41 +825,37 @@ namespace Wpf.Controls.PanAndZoom
         /// <inheritdoc/>
         public void Fill()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                Fill(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height); 
             }
-            Fill(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height);
         }
 
         /// <inheritdoc/>
         public void Uniform()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                Uniform(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height); 
             }
-            Uniform(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height);
         }
 
         /// <inheritdoc/>
         public void UniformToFill()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                UniformToFill(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height); 
             }
-            UniformToFill(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height);
         }
 
         /// <inheritdoc/>
         public void AutoFit()
         {
-            if (_element == null)
+            if (_element != null)
             {
-                return;
+                AutoFit(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height);
             }
-            AutoFit(this.RenderSize.Width, this.RenderSize.Height, _element.RenderSize.Width, _element.RenderSize.Height);
         }
     }
 }
